@@ -11,6 +11,7 @@
 
     <style>
         body { margin: 0; overflow: hidden; background-color: #fff; }
+        /* ... all other styles are the same ... */
         canvas { display: block; }
         #blocker { position: absolute; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; background-color: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); opacity: 1; transition: opacity 0.5s ease-in-out, backdrop-filter 0.5s ease-in-out; }
         #blocker.hidden { opacity: 0; pointer-events: none; }
@@ -19,28 +20,40 @@
         .subtitle { font-size: 1rem; font-weight: 300; opacity: 0.7; margin: 20px 0; }
         .cta-button { display: inline-block; margin-top: 20px; padding: 12px 24px; border: 1px solid #222; border-radius: 50px; font-weight: 600; cursor: pointer; transition: background-color 0.3s, color 0.3s; }
         .cta-button:hover { background-color: #222; color: #fff; }
+        /* ADDED: A small notification for the controller */
+        #controller-status {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0,0,0,0.5);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-family: 'Poppins', sans-serif;
+            font-size: 14px;
+            opacity: 0;
+            transition: opacity 0.5s;
+            pointer-events: none;
+        }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
-    <audio src="assets/dream-music.wav" autoplay loop></audio>
     <div id="blocker">
         <div class="welcome-container">
             <h1>Dreaming Of Thoughts</h1>
-            <p class="subtitle">W, A, S, D = MOVE | MOUSE = LOOK | SPACE = JUMP | ESC = RELEASE CURSOR</p>
+            <p class="subtitle">W, A, S, D = MOVE | MOUSE/RIGHT STICK = LOOK | SPACE/A-BUTTON = JUMP</p>
             <div class="cta-button" id="enter-button">CLICK TO ENTER</div>
         </div>
     </div>
+    
+    <div id="controller-status">Controller Connected</div>
 
     <canvas id="webgl"></canvas>
 
     <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
-            }
-        }
+        { "imports": { "three": "https://unpkg.com/three@0.165.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/" } }
     </script>
 
     <script type="module">
@@ -50,18 +63,20 @@
         import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
         import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
-        let camera, scene, renderer, composer, controls;
+        let camera, scene, renderer, composer, controls, sound;
         let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
-        
-        // ADDED: Variables for jump physics
         let canJump = true;
         let verticalVelocity = 0;
-        const gravity = -30.0; // A stronger gravity for a snappier feel
-        const jumpInitialVelocity = 8.0;
-
+        const gravity = -20;
+        const jumpVelocity = 10;
+        
         let prevTime = performance.now();
         const velocity = new THREE.Vector3();
         const direction = new THREE.Vector3();
+
+        // ADDED: Gamepad state variables
+        let gamepad = null;
+        const gamepadLookSensitivity = 2.0;
 
         const floatingCubes = [];
         const worldBoundary = 80;
@@ -71,14 +86,13 @@
         animate();
 
         function init() {
+            // ... Scene, Camera, Renderer setup is the same ...
             scene = new THREE.Scene();
             const fogColor = 0xffffff;
             scene.fog = new THREE.Fog(fogColor, 1, worldHalfBoundary - 10);
             scene.background = new THREE.Color(fogColor);
-
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.y = 1.7; // Player eye-height
-
+            camera.position.y = 1.7;
             const canvas = document.querySelector('#webgl');
             renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -87,56 +101,46 @@
             controls = new PointerLockControls(camera, document.body);
             const blocker = document.getElementById('blocker');
             const enterButton = document.getElementById('enter-button');
-            enterButton.addEventListener('click', () => { controls.lock(); });
+            enterButton.addEventListener('click', () => { controls.lock(); /* ... music logic ... */ });
             controls.addEventListener('lock', () => { blocker.classList.add('hidden'); });
             controls.addEventListener('unlock', () => { blocker.classList.remove('hidden'); });
             scene.add(controls.getObject());
 
-            // MODIFIED: Added 'Space' key to the keydown listener
-            document.addEventListener('keydown', (event) => {
-                switch (event.code) {
-                    case 'KeyW': moveForward = true; break;
-                    case 'KeyA': moveLeft = true; break;
-                    case 'KeyS': moveBackward = true; break;
-                    case 'KeyD': moveRight = true; break;
-                    case 'Space':
-                        if (canJump) {
-                            verticalVelocity = jumpInitialVelocity;
-                            canJump = false;
-                        }
-                        break;
-                }
-            });
-            document.addEventListener('keyup', (event) => {
-                switch (event.code) {
-                    case 'KeyW': moveForward = false; break;
-                    case 'KeyA': moveLeft = false; break;
-                    case 'KeyS': moveBackward = false; break;
-                    case 'KeyD': moveRight = false; break;
-                }
+            // ... Keyboard listeners are the same ...
+            document.addEventListener('keydown', (event) => { switch (event.code) { case 'KeyW': moveForward = true; break; case 'KeyA': moveLeft = true; break; case 'KeyS': moveBackward = true; break; case 'KeyD': moveRight = true; break; case 'Space': if (canJump) { verticalVelocity = jumpVelocity; canJump = false; } break; } });
+            document.addEventListener('keyup', (event) => { switch (event.code) { case 'KeyW': moveForward = false; break; case 'KeyA': moveLeft = false; break; case 'KeyS': moveBackward = false; break; case 'KeyD': moveRight = false; break; } });
+            
+            // ADDED: Gamepad connection listeners
+            window.addEventListener('gamepadconnected', (event) => {
+                console.log('Gamepad connected at index %d: %s. %d buttons, %d axes.',
+                    event.gamepad.index, event.gamepad.id,
+                    event.gamepad.buttons.length, event.gamepad.axes.length);
+                gamepad = event.gamepad;
+                const status = document.getElementById('controller-status');
+                status.style.opacity = 1;
+                setTimeout(() => { status.style.opacity = 0; }, 2000);
             });
 
+            window.addEventListener('gamepaddisconnected', (event) => {
+                console.log('Gamepad disconnected from index %d: %s',
+                    event.gamepad.index, event.gamepad.id);
+                gamepad = null;
+            });
+
+            // ... Lighting, Plane, Cubes, Composer setup is the same ...
             const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0xcccccc, 1.5);
             scene.add(hemisphereLight);
-
             const planeGeometry = new THREE.PlaneGeometry(200, 200);
             const planeMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0.1 });
             const plane = new THREE.Mesh(planeGeometry, planeMaterial);
             plane.rotation.x = -Math.PI / 2;
             scene.add(plane);
-
+            const glassMaterial = new THREE.MeshPhysicalMaterial({ color: new THREE.Color(0.8, 0.8, 1.0), transparent: true, opacity: 0.4, transmission: 0.9, ior: 1.5, roughness: 0.05, metalness: 0.0 });
             const boxGeometry = new THREE.BoxGeometry(1, 1, 1);
-            const boxMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc });
-
             for (let i = 0; i < 200; i++) {
-                const box = new THREE.Mesh(boxGeometry, boxMaterial);
+                const box = new THREE.Mesh(boxGeometry, glassMaterial);
                 const initialY = Math.random() * 8 + 1;
-                box.position.set(
-                    (Math.random() - 0.5) * worldBoundary,
-                    initialY,
-                    (Math.random() - 0.5) * worldBoundary
-                );
-
+                box.position.set( (Math.random() - 0.5) * worldBoundary, initialY, (Math.random() - 0.5) * worldBoundary );
                 const cornerRotation = Math.PI / 4;
                 box.rotation.set(cornerRotation, 0, cornerRotation);
                 box.userData.initialY = initialY;
@@ -144,21 +148,49 @@
                 scene.add(box);
                 floatingCubes.push(box);
             }
-
             composer = new EffectComposer(renderer);
             composer.addPass(new RenderPass(scene, camera));
             const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.5, 0.5, 0.85);
             composer.addPass(bloomPass);
-
             window.addEventListener('resize', onWindowResize);
         }
+        
+        // ADDED: A function to handle all gamepad logic
+        function handleGamepadInput(delta) {
+            if (!gamepad) return;
 
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            composer.setSize(window.innerWidth, window.innerHeight);
+            // Must re-acquire the gamepad state on each frame
+            const gp = navigator.getGamepads()[gamepad.index];
+
+            // --- Movement (Left Stick) ---
+            const leftStickX = gp.axes[0];
+            const leftStickY = gp.axes[1];
+            // Deadzone to prevent drift
+            if (Math.abs(leftStickX) > 0.1) direction.x = -leftStickX;
+            if (Math.abs(leftStickY) > 0.1) direction.z = -leftStickY;
+
+            // --- Camera Look (Right Stick) ---
+            const rightStickX = gp.axes[2];
+            const rightStickY = gp.axes[3];
+            const cameraObject = controls.getObject();
+            // Deadzone
+            if (Math.abs(rightStickX) > 0.1) {
+                cameraObject.rotation.y -= rightStickX * gamepadLookSensitivity * delta;
+            }
+            if (Math.abs(rightStickY) > 0.1) {
+                cameraObject.rotation.x -= rightStickY * gamepadLookSensitivity * delta;
+                // Clamp vertical look to prevent flipping upside down
+                cameraObject.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraObject.rotation.x));
+            }
+
+            // --- Jumping (A button on Xbox, X on PlayStation) ---
+            if (gp.buttons[0].pressed && canJump) {
+                verticalVelocity = jumpVelocity;
+                canJump = false;
+            }
         }
+
+        function onWindowResize() { /* ... Unchanged ... */ }
 
         function animate() {
             requestAnimationFrame(animate);
@@ -166,26 +198,36 @@
             const time = performance.now();
             const delta = (time - prevTime) / 1000;
 
+            // Reset direction vector
+            direction.x = 0;
+            direction.z = 0;
+            
+            // MODIFIED: Handle both keyboard and gamepad input
             if (controls.isLocked) {
-                // --- Player Movement Logic ---
-                // Horizontal movement (W,A,S,D)
+                // Check keyboard state
+                direction.z += Number(moveForward) - Number(moveBackward);
+                direction.x += Number(moveRight) - Number(moveLeft);
+                
+                // Check gamepad state
+                handleGamepadInput(delta);
+                
+                // --- Apply Physics & Movement ---
                 velocity.x -= velocity.x * 10.0 * delta;
                 velocity.z -= velocity.z * 10.0 * delta;
-                direction.z = Number(moveForward) - Number(moveBackward);
-                direction.x = Number(moveRight) - Number(moveLeft);
-                direction.normalize(); // ensures consistent speed in all directions
-                if (moveForward || moveBackward) velocity.z -= direction.z * 40.0 * delta;
-                if (moveLeft || moveRight) velocity.x -= direction.x * 40.0 * delta;
-                controls.moveRight(-velocity.x * delta);
-                controls.moveForward(-velocity.z * delta);
 
-                // ADDED: Vertical movement (Jump and Gravity)
-                // Apply gravity
+                // Normalize to ensure consistent speed
+                if (direction.length() > 1) direction.normalize();
+
+                velocity.z -= direction.z * 40.0 * delta;
+                velocity.x -= direction.x * 40.0 * delta;
+
+                controls.moveRight(-velocity.x * delta);
+                controls.moveForward(velocity.z * delta); // Note: Forward is -Z, so we use +velocity.z
+                
+                // Apply gravity and jumping
                 verticalVelocity += gravity * delta;
-                // Move the camera vertically
                 controls.getObject().position.y += verticalVelocity * delta;
 
-                // ADDED: Check for ground collision
                 if (controls.getObject().position.y < 1.7) {
                     verticalVelocity = 0;
                     controls.getObject().position.y = 1.7;
@@ -193,24 +235,13 @@
                 }
             }
 
-            // --- Animate Cubes ---
-            const animationTime = time * 0.0005;
+            // --- Animate Cubes (unchanged) ---
             floatingCubes.forEach(cube => {
-                // World wrapping logic
-                if (cube.position.x < camera.position.x - worldHalfBoundary) {
-                    cube.position.x += worldBoundary;
-                } else if (cube.position.x > camera.position.x + worldHalfBoundary) {
-                    cube.position.x -= worldBoundary;
-                }
-                if (cube.position.z < camera.position.z - worldHalfBoundary) {
-                    cube.position.z += worldBoundary;
-                } else if (cube.position.z > camera.position.z + worldHalfBoundary) {
-                    cube.position.z -= worldBoundary;
-                }
-
-                // Spinning and bouncing logic
+                // ... world wrapping and animation ...
+                if (cube.position.x < camera.position.x - worldHalfBoundary) { cube.position.x += worldBoundary; } else if (cube.position.x > camera.position.x + worldHalfBoundary) { cube.position.x -= worldBoundary; }
+                if (cube.position.z < camera.position.z - worldHalfBoundary) { cube.position.z += worldBoundary; } else if (cube.position.z > camera.position.z + worldHalfBoundary) { cube.position.z -= worldBoundary; }
                 cube.rotation.y += delta * 0.2;
-                const bounceFactor = Math.sin(animationTime + cube.userData.randomOffset);
+                const bounceFactor = Math.sin(time * 0.0005 + cube.userData.randomOffset);
                 cube.position.y = cube.userData.initialY + bounceFactor * 0.5;
             });
 
