@@ -20,22 +20,7 @@
         .subtitle { font-size: 1rem; font-weight: 300; opacity: 0.7; margin: 20px 0; }
         .cta-button { display: inline-block; margin-top: 20px; padding: 12px 24px; border: 1px solid #222; border-radius: 50px; font-weight: 600; cursor: pointer; transition: background-color 0.3s, color 0.3s; }
         .cta-button:hover { background-color: #222; color: #fff; }
-        /* ADDED: A small notification for the controller */
-        #controller-status {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background-color: rgba(0,0,0,0.5);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 20px;
-            font-family: 'Poppins', sans-serif;
-            font-size: 14px;
-            opacity: 0;
-            transition: opacity 0.5s;
-            pointer-events: none;
-        }
+        #controller-status { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background-color: rgba(0,0,0,0.5); color: white; padding: 10px 20px; border-radius: 20px; font-family: 'Poppins', sans-serif; font-size: 14px; opacity: 0; transition: opacity 0.5s; pointer-events: none; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
@@ -49,8 +34,9 @@
     </div>
     
     <div id="controller-status">Controller Connected</div>
-
     <canvas id="webgl"></canvas>
+    
+    <audio id="background-music" src="assets/dream-music.wav" loop></audio>
 
     <script type="importmap">
         { "imports": { "three": "https://unpkg.com/three@0.165.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/" } }
@@ -63,24 +49,22 @@
         import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
         import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
-        let camera, scene, renderer, composer, controls, sound;
+        let camera, scene, renderer, composer, controls;
+        // ... all other variables are the same ...
         let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
         let canJump = true;
         let verticalVelocity = 0;
         const gravity = -20;
         const jumpVelocity = 10;
-        
         let prevTime = performance.now();
         const velocity = new THREE.Vector3();
         const direction = new THREE.Vector3();
-
-        // ADDED: Gamepad state variables
         let gamepad = null;
         const gamepadLookSensitivity = 2.0;
-
         const floatingCubes = [];
         const worldBoundary = 80;
         const worldHalfBoundary = worldBoundary / 2;
+
 
         init();
         animate();
@@ -98,36 +82,29 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
+
             controls = new PointerLockControls(camera, document.body);
             const blocker = document.getElementById('blocker');
             const enterButton = document.getElementById('enter-button');
-            enterButton.addEventListener('click', () => { controls.lock(); /* ... music logic ... */ });
+            
+            // MODIFIED: Added the audio playback logic to the click listener
+            enterButton.addEventListener('click', () => {
+                controls.lock();
+                
+                // Find the audio element in the HTML and play it
+                const music = document.getElementById('background-music');
+                music.play();
+            });
+
             controls.addEventListener('lock', () => { blocker.classList.add('hidden'); });
             controls.addEventListener('unlock', () => { blocker.classList.remove('hidden'); });
             scene.add(controls.getObject());
 
-            // ... Keyboard listeners are the same ...
+            // ... All other event listeners and object creation logic is exactly the same ...
             document.addEventListener('keydown', (event) => { switch (event.code) { case 'KeyW': moveForward = true; break; case 'KeyA': moveLeft = true; break; case 'KeyS': moveBackward = true; break; case 'KeyD': moveRight = true; break; case 'Space': if (canJump) { verticalVelocity = jumpVelocity; canJump = false; } break; } });
             document.addEventListener('keyup', (event) => { switch (event.code) { case 'KeyW': moveForward = false; break; case 'KeyA': moveLeft = false; break; case 'KeyS': moveBackward = false; break; case 'KeyD': moveRight = false; break; } });
-            
-            // ADDED: Gamepad connection listeners
-            window.addEventListener('gamepadconnected', (event) => {
-                console.log('Gamepad connected at index %d: %s. %d buttons, %d axes.',
-                    event.gamepad.index, event.gamepad.id,
-                    event.gamepad.buttons.length, event.gamepad.axes.length);
-                gamepad = event.gamepad;
-                const status = document.getElementById('controller-status');
-                status.style.opacity = 1;
-                setTimeout(() => { status.style.opacity = 0; }, 2000);
-            });
-
-            window.addEventListener('gamepaddisconnected', (event) => {
-                console.log('Gamepad disconnected from index %d: %s',
-                    event.gamepad.index, event.gamepad.id);
-                gamepad = null;
-            });
-
-            // ... Lighting, Plane, Cubes, Composer setup is the same ...
+            window.addEventListener('gamepadconnected', (event) => { gamepad = event.gamepad; const status = document.getElementById('controller-status'); status.style.opacity = 1; setTimeout(() => { status.style.opacity = 0; }, 2000); });
+            window.addEventListener('gamepaddisconnected', (event) => { gamepad = null; });
             const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0xcccccc, 1.5);
             scene.add(hemisphereLight);
             const planeGeometry = new THREE.PlaneGeometry(200, 200);
@@ -155,99 +132,10 @@
             window.addEventListener('resize', onWindowResize);
         }
         
-        // ADDED: A function to handle all gamepad logic
-        function handleGamepadInput(delta) {
-            if (!gamepad) return;
-
-            // Must re-acquire the gamepad state on each frame
-            const gp = navigator.getGamepads()[gamepad.index];
-
-            // --- Movement (Left Stick) ---
-            const leftStickX = gp.axes[0];
-            const leftStickY = gp.axes[1];
-            // Deadzone to prevent drift
-            if (Math.abs(leftStickX) > 0.1) direction.x = -leftStickX;
-            if (Math.abs(leftStickY) > 0.1) direction.z = -leftStickY;
-
-            // --- Camera Look (Right Stick) ---
-            const rightStickX = gp.axes[2];
-            const rightStickY = gp.axes[3];
-            const cameraObject = controls.getObject();
-            // Deadzone
-            if (Math.abs(rightStickX) > 0.1) {
-                cameraObject.rotation.y -= rightStickX * gamepadLookSensitivity * delta;
-            }
-            if (Math.abs(rightStickY) > 0.1) {
-                cameraObject.rotation.x -= rightStickY * gamepadLookSensitivity * delta;
-                // Clamp vertical look to prevent flipping upside down
-                cameraObject.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraObject.rotation.x));
-            }
-
-            // --- Jumping (A button on Xbox, X on PlayStation) ---
-            if (gp.buttons[0].pressed && canJump) {
-                verticalVelocity = jumpVelocity;
-                canJump = false;
-            }
-        }
-
-        function onWindowResize() { /* ... Unchanged ... */ }
-
-        function animate() {
-            requestAnimationFrame(animate);
-
-            const time = performance.now();
-            const delta = (time - prevTime) / 1000;
-
-            // Reset direction vector
-            direction.x = 0;
-            direction.z = 0;
-            
-            // MODIFIED: Handle both keyboard and gamepad input
-            if (controls.isLocked) {
-                // Check keyboard state
-                direction.z += Number(moveForward) - Number(moveBackward);
-                direction.x += Number(moveRight) - Number(moveLeft);
-                
-                // Check gamepad state
-                handleGamepadInput(delta);
-                
-                // --- Apply Physics & Movement ---
-                velocity.x -= velocity.x * 10.0 * delta;
-                velocity.z -= velocity.z * 10.0 * delta;
-
-                // Normalize to ensure consistent speed
-                if (direction.length() > 1) direction.normalize();
-
-                velocity.z -= direction.z * 40.0 * delta;
-                velocity.x -= direction.x * 40.0 * delta;
-
-                controls.moveRight(-velocity.x * delta);
-                controls.moveForward(velocity.z * delta); // Note: Forward is -Z, so we use +velocity.z
-                
-                // Apply gravity and jumping
-                verticalVelocity += gravity * delta;
-                controls.getObject().position.y += verticalVelocity * delta;
-
-                if (controls.getObject().position.y < 1.7) {
-                    verticalVelocity = 0;
-                    controls.getObject().position.y = 1.7;
-                    canJump = true;
-                }
-            }
-
-            // --- Animate Cubes (unchanged) ---
-            floatingCubes.forEach(cube => {
-                // ... world wrapping and animation ...
-                if (cube.position.x < camera.position.x - worldHalfBoundary) { cube.position.x += worldBoundary; } else if (cube.position.x > camera.position.x + worldHalfBoundary) { cube.position.x -= worldBoundary; }
-                if (cube.position.z < camera.position.z - worldHalfBoundary) { cube.position.z += worldBoundary; } else if (cube.position.z > camera.position.z + worldHalfBoundary) { cube.position.z -= worldBoundary; }
-                cube.rotation.y += delta * 0.2;
-                const bounceFactor = Math.sin(time * 0.0005 + cube.userData.randomOffset);
-                cube.position.y = cube.userData.initialY + bounceFactor * 0.5;
-            });
-
-            prevTime = time;
-            composer.render();
-        }
+        // ... The rest of the script (handleGamepadInput, onWindowResize, animate) is exactly the same ...
+        function handleGamepadInput(delta) { if (!gamepad) return; const gp = navigator.getGamepads()[gamepad.index]; const leftStickX = gp.axes[0]; const leftStickY = gp.axes[1]; if (Math.abs(leftStickX) > 0.1) direction.x = -leftStickX; if (Math.abs(leftStickY) > 0.1) direction.z = -leftStickY; const rightStickX = gp.axes[2]; const rightStickY = gp.axes[3]; const cameraObject = controls.getObject(); if (Math.abs(rightStickX) > 0.1) { cameraObject.rotation.y -= rightStickX * gamepadLookSensitivity * delta; } if (Math.abs(rightStickY) > 0.1) { cameraObject.rotation.x -= rightStickY * gamepadLookSensitivity * delta; cameraObject.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraObject.rotation.x)); } if (gp.buttons[0].pressed && canJump) { verticalVelocity = jumpVelocity; canJump = false; } }
+        function onWindowResize() { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); }
+        function animate() { requestAnimationFrame(animate); const time = performance.now(); const delta = (time - prevTime) / 1000; direction.x = 0; direction.z = 0; if (controls.isLocked) { direction.z += Number(moveForward) - Number(moveBackward); direction.x += Number(moveRight) - Number(moveLeft); handleGamepadInput(delta); velocity.x -= velocity.x * 10.0 * delta; velocity.z -= velocity.z * 10.0 * delta; if (direction.length() > 1) direction.normalize(); velocity.z -= direction.z * 40.0 * delta; velocity.x -= direction.x * 40.0 * delta; controls.moveRight(-velocity.x * delta); controls.moveForward(velocity.z * delta); verticalVelocity += gravity * delta; controls.getObject().position.y += verticalVelocity * delta; if (controls.getObject().position.y < 1.7) { verticalVelocity = 0; controls.getObject().position.y = 1.7; canJump = true; } } floatingCubes.forEach(cube => { if (cube.position.x < camera.position.x - worldHalfBoundary) { cube.position.x += worldBoundary; } else if (cube.position.x > camera.position.x + worldHalfBoundary) { cube.position.x -= worldBoundary; } if (cube.position.z < camera.position.z - worldHalfBoundary) { cube.position.z += worldBoundary; } else if (cube.position.z > camera.position.z + worldHalfBoundary) { cube.position.z -= worldBoundary; } cube.rotation.y += delta * 0.2; const bounceFactor = Math.sin(time * 0.0005 + cube.userData.randomOffset); cube.position.y = cube.userData.initialY + bounceFactor * 0.5; }); prevTime = time; composer.render(); }
     </script>
 </body>
 </html>
